@@ -112,8 +112,6 @@ DS1307_param_t ds1307;
 uint8_t fst = 1;
 char lcd_l1[16] = "";
 char lcd_l2[16] = "";
-char name[] = "Nguyen Minh Tuan, 20203631, DT05-K65";
-char sch[] = "Truong Dien - Dien tu, DHBK HN";
 uint8_t mode = 0;
 
 uint8_t led_state = 0;
