@@ -22,8 +22,10 @@ led:1					// turn off led
 #define cbi(PORTx, Pxi)			(PORTx) &= ~(1 << (Pxi))
 #define sbi(PORTx, Pxi)			(PORTx) |= (1 << (Pxi))	
 
+#define DURATION		(10 * 1000)
+
 #define AVCC_MODE		(1 << REFS0)
-#define UART_TIMEOUT	2							//2ms
+#define UART_TIMEOUT	20							//2ms
 
 #define TWI_R			1 
 #define TWI_W			0
@@ -52,7 +54,15 @@ led:1					// turn off led
 #define DATA_RECV_ACK			0x50
 #define DATA_RECV_NACK			0x58
 
-#define DHT11_PIN				(PB0)
+#define DHT11_PIN				(PB4)
+
+#define LCD_Cmd_Port PORTD
+#define LCD_Cmd_Dir DDRD
+#define LCD_Dir  DDRC			/* Define LCD data port direction */
+#define LCD_Port PORTC			/* Define LCD data port */
+#define RS PD6				/* Define Register Select pin */
+#define RW PD5				/* Define Read/Write signal pin */
+#define EN PD7 				/* Define Enable signal pin */
 
 typedef struct {
 	uint8_t sec;
@@ -74,6 +84,7 @@ volatile uint32_t sys_tick = 0;								//1us
 volatile uint32_t g_sys_tick = 0;							//1ms
 volatile uint32_t last_tick = 0;
 volatile uint32_t time_tick = 0;
+volatile uint32_t lcd_tick = 0;
 
 //timer2
 volatile uint32_t tim2_tick = 0;
@@ -96,6 +107,16 @@ uint8_t irh, drh, it, dt, checksum;
 
 DHT11_param_t dht11;
 DS1307_param_t ds1307;
+
+// LCD
+uint8_t fst = 1;
+char lcd_l1[16] = "";
+char lcd_l2[16] = "";
+char name[] = "Nguyen Minh Tuan, 20203631, DT05-K65";
+char sch[] = "Truong Dien - Dien tu, DHBK HN";
+uint8_t mode = 0;
+
+uint8_t led_state = 0;
 
 void TIM0_Init();
 
@@ -125,6 +146,15 @@ void DS1307_Settime(uint8_t sec, uint8_t min, uint8_t hour_24mode, uint8_t dayOf
 void DHT11_Init();									
 void DHT11_GetValue(DHT11_param_t* dht11);
 
+void LCD_Command( unsigned char cmnd );
+void LCD_Char( unsigned char data );
+void LCD_Init (void);
+void LCD_String (char *str);
+void LCD_String_xy (char row, char pos, char *str);
+void LCD_Clear();
+void LCD_Display(uint8_t mode);
+void LCD_Hanlde();
+
 int main(void)
 {
     /* Replace with your application code */
@@ -135,14 +165,14 @@ int main(void)
 	TWI_Init();
 	DS1307_SetClockHalt(0);
 	DS1307_Settime(0, 18, 22, 5, 12, 7, 2023);
-	DDRD = 0xFC;
-	PORTD = 0x00;
-    while (1) 
+	_delay_ms(1000);
+	LCD_Init();
+	LCD_String((char*)"Starting...");
+	while (1) 
     {
 		HandleCommand();
-		if (g_sys_tick - last_tick > 5000) { 
+		if (g_sys_tick - last_tick > DURATION) { 
 			last_tick = g_sys_tick;
-			PORTD = PORTD ^ 0xFC;
 			ADC_val = readADC();
 			DHT11_GetValue(&dht11);
 			DS1307_Gettime(&ds1307);
@@ -155,10 +185,9 @@ int main(void)
 			(int) dht11.tem, (int) dht11.hum);
 			UARTTransmit(ADC_tx);
 			memset(ADC_tx, 0, sizeof(ADC_tx));
+			//PORTD = ~PORTD;
 		}
-
-//		PORTD = PORTD ^ 0xFC;
-//		_delay_ms(1000);
+		LCD_Hanlde();
     }
 }
 
@@ -195,7 +224,8 @@ void UARTTransmit(uint8_t *tx) {
 }
 
 void HandleCommand() {
-	if (g_sys_tick - uart_last_rcv > 1 && uart_cnt >= 2) {
+	if (g_sys_tick - uart_last_rcv > UART_TIMEOUT && uart_cnt >= 2) {
+		/*
 		if (strncmp((char*) rx, "led:", 4) == 0) {
 			if (strlen((char*)rx) == 12) {
 				PORTD = (uint8_t) strtoul((char*) (rx + 4), NULL, 2);
@@ -207,11 +237,11 @@ void HandleCommand() {
 				sprintf((char*) tx, "Turn off led\n");
 				UARTTransmit(tx);
 			}
-			// reset rx buffer for the next command
 			memset(rx, 0, strlen((char*) rx));
 			uart_cnt = 0;
 		}
-		else if (strncmp((char*) rx, "time:", 5) == 0 && strlen((char*) rx) == 19) {				//time:YYYYMMddhhmmss
+		*/
+		if (strncmp((char*) rx, "time:", 5) == 0 && strlen((char*) rx) == 19) {				//time:YYYYMMddhhmmss
 			int y, M, d, h, m, s;
 			sscanf((char*) (rx + 5), "%4d%2d%2d%2d%2d%2d", &y, &M, &d, &h, &m, &s);
 			DS1307_Settime(s, m, h, 1, d, M, y);
@@ -376,15 +406,15 @@ void DHT11_GetValue(DHT11_param_t* dht11) {
 	_delay_us(30);
 	
 	if(PINB & (1 << DHT11_PIN)) {
-		sprintf((char*) rx, "Err1\n");
-		UARTTransmit(rx);
+		//sprintf((char*) rx, "Err1\n");
+		//UARTTransmit(rx);
 		return;
 	}
 	_delay_us(80);
 	
 	if(!(PINB & (1 << DHT11_PIN))) {
-		sprintf((char*) rx, "Err2\n");
-		UARTTransmit(rx);
+		//sprintf((char*) rx, "Err2\n");
+		//UARTTransmit(rx);
 		return;
 	}
 	_delay_us(80);									// wait dht response
@@ -407,6 +437,133 @@ void DHT11_GetValue(DHT11_param_t* dht11) {
 	
 	dht11->hum = byte[0];
 	dht11->tem = byte[2];
+}
+
+
+void LCD_Command( unsigned char cmnd )
+{
+	LCD_Port = (LCD_Port & 0x0F) | (cmnd & 0xF0); /* sending upper nibble */
+	LCD_Cmd_Port &= ~ (1<<RS);		/* RS=0, command reg. */
+	LCD_Cmd_Port |= (1<<EN);		/* Enable pulse */
+	_delay_us(1);
+	LCD_Cmd_Port &= ~ (1<<EN);
+
+	_delay_us(200);
+
+	LCD_Port = (LCD_Port & 0x0F) | (cmnd << 4);  /* sending lower nibble */
+	LCD_Cmd_Port |= (1<<EN);
+	_delay_us(1);
+	LCD_Cmd_Port &= ~ (1<<EN);
+	_delay_ms(2);
+}
+
+void LCD_Char( unsigned char data )
+{
+	LCD_Port = (LCD_Port & 0x0F) | (data & 0xF0); /* sending upper nibble */
+	LCD_Cmd_Port |= (1<<RS);		/* RS=1, data reg. */
+	LCD_Cmd_Port |= (1<<EN);
+	_delay_us(1);
+	LCD_Cmd_Port &= ~ (1<<EN);
+
+	_delay_us(200);
+
+	LCD_Port = (LCD_Port & 0x0F) | (data << 4); /* sending lower nibble */
+	LCD_Cmd_Port |= (1<<EN);
+	_delay_us(1);
+	LCD_Cmd_Port &= ~ (1<<EN);
+	_delay_ms(2);
+}
+
+void LCD_Init (void)			/* LCD Initialize function */
+{
+	LCD_Dir = 0xFF;			/* Make LCD port direction as o/p */
+	LCD_Cmd_Dir = 0xFF;
+	LCD_Cmd_Port &= ~(1 << RW);
+	_delay_ms(20);			/* LCD Power ON delay always >15ms */
+	
+	LCD_Command(0x02);		/* send for 4 bit initialization of LCD  */
+	LCD_Command(0x28);              /* 2 line, 5*7 matrix in 4-bit mode */
+	LCD_Command(0x0c);              /* Display on cursor off*/
+	LCD_Command(0x06);              /* Increment cursor (shift cursor to right)*/
+	LCD_Command(0x01);              /* Clear display screen*/
+	_delay_ms(2);
+}
+
+void LCD_String (char *str)		/* Send string to LCD function */
+{
+	int i;
+	for(i=0;str[i]!=0;i++)		/* Send each char of string till the NULL */
+	{
+		LCD_Char (str[i]);
+	}
+}
+
+void LCD_String_xy (char row, char pos, char *str)	/* Send string to LCD with xy position */
+{
+	if (row == 0 && pos<16)
+	LCD_Command((pos & 0x0F)|0x80);	/* Command of first row and required position<16 */
+	else if (row == 1 && pos<16)
+	LCD_Command((pos & 0x0F)|0xC0);	/* Command of first row and required position<16 */
+	LCD_String(str);		/* Call LCD string function */
+}
+
+void LCD_Clear()
+{
+	LCD_Command (0x01);		/* Clear display */
+	_delay_ms(2);
+	LCD_Command (0x80);		/* Cursor at home position */
+}
+
+void LCD_Display(uint8_t mode) {
+	if (mode == 0) {
+		LCD_Clear();
+		sprintf(lcd_l1, "Temperature: %d", dht11.tem);
+		sprintf(lcd_l2, "Humidity: %d", dht11.hum);
+		LCD_String_xy(0, 0, lcd_l1);
+		LCD_String_xy(1, 0, lcd_l2);
+	}
+	else if (mode == 1) {
+		LCD_Clear();
+		sprintf(lcd_l1, "Acetone: %d ppm", aqi.Acetone);
+		sprintf(lcd_l2, "Alcohol: %d ppm", aqi.Alcohol);
+		LCD_String_xy(0, 0, lcd_l1);
+		LCD_String_xy(1, 0, lcd_l2);
+	}
+	else if (mode == 2) {
+		LCD_Clear();
+		sprintf(lcd_l1, "CO: %d ppm", aqi.CO);
+		sprintf(lcd_l2, "CO2: %d ppm", aqi.CO2);
+		LCD_String_xy(0, 0, lcd_l1);
+		LCD_String_xy(1, 0, lcd_l2);
+	}
+	else if (mode == 3) {
+		LCD_Clear();
+		sprintf(lcd_l1, "NH4: %d ppm", aqi.NH4);
+		sprintf(lcd_l2, "Toluene: %d ppm", aqi.Toluene);
+		LCD_String_xy(0, 0, lcd_l1);
+		LCD_String_xy(1, 0, lcd_l2);
+	}
+	else if (mode == 4) {
+		LCD_Clear();
+		sprintf(lcd_l1, "%02d : %02d : %04d", ds1307.date, ds1307.month, ds1307.year);
+		sprintf(lcd_l2, "%02d : %02d : %02d", ds1307.hour, ds1307.min, ds1307.sec);
+		LCD_String_xy(0, 0, lcd_l1);
+		LCD_String_xy(1, 0, lcd_l2);
+	}
+}
+
+void LCD_Hanlde() {
+	if (fst && g_sys_tick > 11000) {
+		fst = 0;
+		lcd_tick = g_sys_tick;
+	}
+	if (!fst && g_sys_tick - lcd_tick >= 1700) {
+		LCD_Display(mode);
+		mode++;
+		if (mode == 5) 
+			mode = 0;
+		lcd_tick = g_sys_tick;
+	}
 }
 
 ISR(USART_RXC_vect) {
