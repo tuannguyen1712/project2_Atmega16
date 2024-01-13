@@ -24,6 +24,8 @@ led:1					// turn off led
 
 #define DURATION		(10 * 1000)
 
+#define LED				(PD4)
+
 #define AVCC_MODE		(1 << REFS0)
 #define UART_TIMEOUT	20							//2ms
 
@@ -80,11 +82,10 @@ typedef struct {
 } DHT11_param_t;
 
 //timer0
-volatile uint32_t sys_tick = 0;								//1us
 volatile uint32_t g_sys_tick = 0;							//1ms
 volatile uint32_t last_tick = 0;
-volatile uint32_t time_tick = 0;
 volatile uint32_t lcd_tick = 0;
+volatile uint32_t led_tick = 0;
 
 //timer2
 volatile uint32_t tim2_tick = 0;
@@ -115,6 +116,8 @@ char lcd_l2[16] = "";
 uint8_t mode = 0;
 
 uint8_t led_state = 0;
+
+void blink();
 
 void TIM0_Init();
 
@@ -163,11 +166,12 @@ int main(void)
 	TWI_Init();
 	DS1307_SetClockHalt(0);
 	DS1307_Settime(0, 18, 22, 5, 12, 7, 2023);
-	_delay_ms(1000);
+	//_delay_ms(1000);
 	LCD_Init();
 	LCD_String((char*)"Starting...");
 	while (1) 
     {
+		blink();
 		HandleCommand();
 		if (g_sys_tick - last_tick > DURATION) { 
 			last_tick = g_sys_tick;
@@ -187,6 +191,16 @@ int main(void)
 		}
 		LCD_Hanlde();
     }
+}
+
+void blink() {
+	if (g_sys_tick - led_tick > 1000) {
+		led_tick = g_sys_tick;
+		if (PORTD & (1 << LED)) 
+			PORTD &= ~(1 << LED);
+		else 
+			PORTD |= (1 << LED);
+	}
 }
 
 void TIM0_Init() {
